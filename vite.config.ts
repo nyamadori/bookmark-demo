@@ -9,7 +9,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://127.0.0.1:8787"
+      "/api": "http://127.0.0.1:8787",
+      // Thumbnails are served by the API server, not by Vite's static files.
+      "/ogp": "http://127.0.0.1:8787"
     }
   }
 });

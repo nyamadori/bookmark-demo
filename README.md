@@ -1,10 +1,10 @@
 # Bookmark Demo
 
 A minimal personal bookmark app that runs locally with a Node/Hono API, a React
-+ Vite client, and a SQLite database file.
++ Vite client, a SQLite database file, and local OGP image storage.
 
 The app has no authentication and supports bookmark registration, editing,
-deletion, search, pagination, and page title fetching.
+deletion, search, pagination, page title fetching, and OGP thumbnails.
 
 ## Stack
 
@@ -12,6 +12,7 @@ deletion, search, pagination, and page title fetching.
 - Hono API
 - React + Vite client
 - SQLite for bookmark storage
+- Local filesystem storage for OGP images
 
 ## Local Setup
 
@@ -36,19 +37,20 @@ Open the Vite URL, usually:
 http://127.0.0.1:5173
 ```
 
-The API server listens on `http://127.0.0.1:8787`. Vite proxies `/api` requests
-to that server.
+The API server listens on `http://127.0.0.1:8787`. Vite proxies `/api` and
+`/ogp` requests to that server.
 
 ## Local Data
 
 By default, the server creates:
 
 - `data/bookmarks.sqlite`
+- `data/ogp/`
 
-You can override the database path:
+You can override those paths:
 
 ```sh
-BOOKMARK_DB_PATH=/path/to/bookmarks.sqlite npm run dev:server
+BOOKMARK_DB_PATH=/path/to/bookmarks.sqlite OGP_STORAGE_DIR=/path/to/ogp npm run dev:server
 ```
 
 Migrations in `migrations/` are applied automatically when the server starts.
@@ -73,3 +75,10 @@ a memo. They can also be deleted. Delete actions ask for browser confirmation
 before removing the bookmark. The list is paginated at 10 bookmarks per page.
 Search terms are split by spaces and matched as AND conditions against URL,
 title, tags, and memo with SQL `LIKE`.
+
+When a page declares an `og:image`, the server downloads it if it is a supported
+raster type (PNG, JPEG, WebP, GIF, or AVIF) no larger than 5 MB, stores it under
+`data/ogp/`, and returns a local path such as `/ogp/<uuid>.png` that the list
+screen shows as a thumbnail. Fetching the image is best-effort: when a page has
+no `og:image` or the download fails, the bookmark is still saved and the list
+shows no thumbnail.

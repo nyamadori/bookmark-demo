@@ -14,6 +14,7 @@ You can:
 - Search bookmarks by URL, title, tags, or memo.
 - See saved bookmarks in a newest-first paginated list.
 - Store bookmark data in a local SQLite file.
+- See the linked page's OGP image as a thumbnail in the list.
 
 ## Install Dependencies
 
@@ -52,12 +53,13 @@ The server creates local data automatically:
 
 ```text
 data/bookmarks.sqlite
+data/ogp/
 ```
 
-Override the database path when needed:
+Override those paths when needed:
 
 ```sh
-BOOKMARK_DB_PATH=/tmp/bookmarks.sqlite npm run dev:server
+BOOKMARK_DB_PATH=/tmp/bookmarks.sqlite OGP_STORAGE_DIR=/tmp/bookmark-ogp npm run dev:server
 ```
 
 SQL migrations in `migrations/` are applied automatically on server startup.
@@ -82,6 +84,12 @@ remove a bookmark, click `Delete` and confirm the browser dialog.
 
 If title fetching fails, the bookmark is still saved. In that case, the URL is
 used as the title.
+
+If the page declares an `og:image`, the server downloads it into `data/ogp/` and
+the list shows it as a thumbnail. Only PNG, JPEG, WebP, GIF, and AVIF images up
+to 5 MB are stored, and they are served through `/ogp/<file name>`. When a page
+has no `og:image` or the download fails, the bookmark is still saved without a
+thumbnail.
 
 ## API Endpoints
 
