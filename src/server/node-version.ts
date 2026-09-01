@@ -1,4 +1,5 @@
-const MIN_NODE_VERSION = [22, 5, 0] as const;
+// node:sqlite は 22.5.0 で追加されたが、22.13.0 未満は --experimental-sqlite が必要
+const MIN_NODE_VERSION = [22, 13, 0] as const;
 
 export const isSupportedNodeVersion = (version: string) => {
   const [major = 0, minor = 0, patch = 0] = version.split(".").map(Number);
