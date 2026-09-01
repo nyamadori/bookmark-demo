@@ -4,6 +4,9 @@ export type Bookmark = {
   title: string;
   tags: string;
   memo: string;
+  // Local path of the saved OGP image, such as "/ogp/<uuid>.png". Empty when the
+  // page had no og:image or the download failed.
+  ogpImageUrl: string;
   createdAt: string;
   updatedAt: string;
 };

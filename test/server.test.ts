@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,20 +6,29 @@ import { createApp } from "../src/server/app";
 import { BookmarkDatabase } from "../src/server/db";
 
 let tempDir: string;
+let ogpStorageDir: string;
 let db: BookmarkDatabase;
 
-const createTestApp = () => createApp({ db });
+const createTestApp = () => createApp({ db, ogpStorageDir });
 
-const addBookmark = (input: { url: string; title: string; tags?: string; memo?: string }) =>
+const addBookmark = (input: {
+  url: string;
+  title: string;
+  tags?: string;
+  memo?: string;
+  ogpImageUrl?: string;
+}) =>
   db.createBookmark({
     url: input.url,
     title: input.title,
     tags: input.tags ?? "",
-    memo: input.memo ?? ""
+    memo: input.memo ?? "",
+    ogpImageUrl: input.ogpImageUrl ?? ""
   });
 
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), "bookmark-demo-"));
+  ogpStorageDir = join(tempDir, "ogp");
   db = new BookmarkDatabase(join(tempDir, "bookmarks.sqlite"));
   db.migrate(join(process.cwd(), "migrations"));
 });
@@ -31,12 +40,6 @@ afterEach(async () => {
 });
 
 describe("local server bookmarks API", () => {
-  it("returns 404 for the removed OGP image endpoint", async () => {
-    const response = await createTestApp().request("http://localhost/api/ogp/some-name");
-
-    expect(response.status).toBe(404);
-  });
-
   it("clamps an out-of-range page before selecting bookmarks", async () => {
     for (let index = 1; index <= 21; index += 1) {
       addBookmark({
@@ -153,5 +156,63 @@ describe("local server bookmarks API", () => {
     });
     expect(deleted.status).toBe(204);
     expect(missing.status).toBe(404);
+  });
+
+  it("saves the OGP image path when creating a bookmark", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+
+        return url.endsWith("/cover.png")
+          ? new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/png" } })
+          : new Response(
+              '<title>Example</title><meta property="og:image" content="https://example.com/cover.png">',
+              { headers: { "content-type": "text/html" } }
+            );
+      })
+    );
+    const app = createTestApp();
+
+    const created = await app.request("http://localhost/api/bookmarks", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: "https://example.com/article" })
+    });
+    const body = await created.json() as { bookmark: { ogpImageUrl: string } };
+
+    expect(created.status).toBe(201);
+    expect(body.bookmark.ogpImageUrl).toMatch(/^\/ogp\/[0-9a-f-]{36}\.png$/);
+
+    // The stored path must be the one the image route can serve back.
+    const image = await app.request(`http://localhost${body.bookmark.ogpImageUrl}`);
+    expect(image.status).toBe(200);
+  });
+});
+
+describe("local OGP image route", () => {
+  const imageName = "11111111-2222-3333-4444-555555555555.png";
+
+  it("serves a stored OGP image with a one-day cache", async () => {
+    await mkdir(ogpStorageDir, { recursive: true });
+    await writeFile(join(ogpStorageDir, imageName), new Uint8Array([1, 2, 3]));
+
+    const response = await createTestApp().request(`http://localhost/ogp/${imageName}`);
+    const body = new Uint8Array(await response.arrayBuffer());
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(response.headers.get("cache-control")).toBe("public, max-age=86400, immutable");
+    expect([...body]).toEqual([1, 2, 3]);
+  });
+
+  it("returns 404 for missing images and path traversal attempts", async () => {
+    await writeFile(join(tempDir, "outside.png"), new Uint8Array([1, 2, 3]));
+
+    const missing = await createTestApp().request(`http://localhost/ogp/${imageName}`);
+    const traversal = await createTestApp().request("http://localhost/ogp/..%2Foutside.png");
+
+    expect(missing.status).toBe(404);
+    expect(traversal.status).toBe(404);
   });
 });

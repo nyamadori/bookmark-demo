@@ -1,10 +1,14 @@
 import { Hono } from "hono";
 import type { BookmarkDatabase } from "./db";
+import { storeOgpImage } from "./ogp";
+import { readOgpImage } from "./storage";
 import type { CreateBookmarkRequest, UpdateBookmarkRequest } from "../shared/bookmarks";
 import { fetchPageTitle, normalizeUrl } from "./title";
 
 export type AppDependencies = {
   db: BookmarkDatabase;
+  // Folder that holds the downloaded OGP images, served through /ogp/:name.
+  ogpStorageDir: string;
 };
 
 const PAGE_SIZE = 10;
@@ -68,7 +72,7 @@ const buildSearchFilter = (terms: string[]) => {
 const isUniqueError = (error: unknown) =>
   error instanceof Error && error.message.toLowerCase().includes("unique");
 
-export const createApp = ({ db }: AppDependencies) => {
+export const createApp = ({ db, ogpStorageDir }: AppDependencies) => {
   const app = new Hono();
 
   app.get("/api/bookmarks", (c) => {
@@ -104,9 +108,11 @@ export const createApp = ({ db }: AppDependencies) => {
     const tags = cleanTags((payload as CreateBookmarkRequest).tags);
     const memo = cleanText((payload as CreateBookmarkRequest).memo);
     const title = (await fetchPageTitle(url)) ?? url;
+    // Best-effort: an empty string here just means the list shows no thumbnail.
+    const ogpImageUrl = await storeOgpImage(url, ogpStorageDir);
 
     try {
-      const bookmark = db.createBookmark({ url, title, tags, memo });
+      const bookmark = db.createBookmark({ url, title, tags, memo, ogpImageUrl });
       return c.json({ bookmark }, 201);
     } catch (error) {
       if (isUniqueError(error)) {
@@ -146,9 +152,11 @@ export const createApp = ({ db }: AppDependencies) => {
     const tags = cleanTags((payload as UpdateBookmarkRequest).tags);
     const memo = cleanText((payload as UpdateBookmarkRequest).memo);
     const title = (await fetchPageTitle(url)) ?? url;
+    // The URL can change on edit, so refresh the thumbnail alongside the title.
+    const ogpImageUrl = await storeOgpImage(url, ogpStorageDir);
 
     try {
-      const bookmark = db.updateBookmark(id, { url, title, tags, memo });
+      const bookmark = db.updateBookmark(id, { url, title, tags, memo, ogpImageUrl });
       if (!bookmark) {
         return c.json({ error: "Bookmark not found." }, 404);
       }
@@ -174,6 +182,31 @@ export const createApp = ({ db }: AppDependencies) => {
     }
 
     return c.body(null, 204);
+  });
+
+  // The images live outside the client bundle, so the API serves them instead of
+  // exposing the storage folder as static files.
+  app.get("/ogp/:name", async (c) => {
+    const image = await readOgpImage(ogpStorageDir, c.req.param("name"));
+    if (!image) {
+      return c.json({ error: "Image not found." }, 404);
+    }
+
+    // readFile returns a Buffer backed by a shared pool, so hand Response only
+    // the bytes of this image.
+    const body = image.body.buffer.slice(
+      image.body.byteOffset,
+      image.body.byteOffset + image.body.byteLength
+    ) as ArrayBuffer;
+
+    return new Response(body, {
+      headers: {
+        "content-type": image.contentType,
+        // Each file is stored under a fresh random name, so its bytes never
+        // change and the browser can cache it for a day.
+        "cache-control": "public, max-age=86400, immutable"
+      }
+    });
   });
 
   return app;

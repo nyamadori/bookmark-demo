@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -11,6 +11,7 @@ const { BookmarkDatabase } = await import("./db");
 
 const rootDir = process.cwd();
 const dbPath = resolve(process.env.BOOKMARK_DB_PATH ?? join(rootDir, "data", "bookmarks.sqlite"));
+const ogpStorageDir = resolve(process.env.OGP_STORAGE_DIR ?? join(rootDir, "data", "ogp"));
 const migrationsDir = resolve(rootDir, "migrations");
 const clientDir = resolve(rootDir, "dist", "client");
 const port = Number(process.env.PORT ?? "8787");
@@ -18,7 +19,10 @@ const port = Number(process.env.PORT ?? "8787");
 const db = new BookmarkDatabase(dbPath);
 db.migrate(migrationsDir);
 
-const app = createApp({ db });
+// Create the image folder up front so the first bookmark does not have to.
+mkdirSync(ogpStorageDir, { recursive: true });
+
+const app = createApp({ db, ogpStorageDir });
 
 if (existsSync(clientDir)) {
   app.use("/*", serveStatic({ root: clientDir }));
@@ -29,3 +33,4 @@ serve({ fetch: app.fetch, port });
 
 console.log(`Bookmark Demo server running at http://127.0.0.1:${port}`);
 console.log(`SQLite database: ${dbPath}`);
+console.log(`OGP storage: ${ogpStorageDir}`);
